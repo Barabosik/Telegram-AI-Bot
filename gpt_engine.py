@@ -1,6 +1,7 @@
 import logging
 import threading
 import time
+import base64
 from typing import List, Dict, Optional, Iterable, cast
 
 import tiktoken
@@ -138,6 +139,62 @@ class GPTEngine:
             Iterable[ChatCompletionMessageParam], chat_messages
         )
 
+        client = self.client.with_options(timeout=self.request_timeout_seconds)
+        resp = client.chat.completions.create(
+            model=self.model,
+            messages=typed_messages,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
+        text = resp.choices[0].message.content or ""
+        return text.strip()
+
+    def _guess_mime(self, data: bytes) -> str:
+        if len(data) >= 8 and data[:8] == b"\x89PNG\r\n\x1a\n":
+            return "image/png"
+        if len(data) >= 3 and data[:3] == b"\xff\xd8\xff":
+            return "image/jpeg"
+        if len(data) >= 4 and data[:4] in (b"GIF8",):
+            return "image/gif"
+        return "image/jpeg"
+
+    @retry(wait=wait_exponential(multiplier=1, min=1, max=10),
+           stop=stop_after_attempt(config.OPENAI_RETRY_ATTEMPTS), reraise=True,
+           retry=retry_if_exception_type(Exception))
+    def generate_vision_reply(
+        self,
+        prompt_text: Optional[str],
+        image_bytes: bytes,
+        system_prompt: Optional[str] = None,
+    ) -> str:
+        """
+        Generate a reply based on an image plus optional user text using GPT vision (4o family).
+        """
+        user_text = (prompt_text or "Describe this image in detail.").strip()
+
+        mime = self._guess_mime(image_bytes)
+        b64 = base64.b64encode(image_bytes).decode("ascii")
+        data_url = f"data:{mime};base64,{b64}"
+
+        chat_messages: List[Dict] = []
+        if system_prompt:
+            chat_messages.append({"role": "system", "content": system_prompt})
+        chat_messages.append(
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_text},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            }
+        )
+
+        # Rate limit before calling the API
+        self._respect_min_interval()
+
+        typed_messages: Iterable[ChatCompletionMessageParam] = cast(
+            Iterable[ChatCompletionMessageParam], chat_messages
+        )
         client = self.client.with_options(timeout=self.request_timeout_seconds)
         resp = client.chat.completions.create(
             model=self.model,

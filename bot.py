@@ -149,6 +149,7 @@ class TelegramPersonaBot:
         self.app.add_handler(CommandHandler("reset", self.on_reset))
         self.app.add_handler(CommandHandler("persona", self.on_persona))
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.on_message))
+        self.app.add_handler(MessageHandler(filters.PHOTO, self.on_photo))
 
     async def _ensure_bot_username(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self.bot_username:
@@ -305,6 +306,59 @@ class TelegramPersonaBot:
         if chat is None:
             return
         for chunk in self._chunk_text(assistant_text, config.REPLY_MAX_CHARS):
+            await context.bot.send_message(chat_id=chat.id, text=chunk)
+
+    async def on_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._ensure_bot_username(context)
+        message = update.message
+        if message is None or not message.photo:
+            return
+
+        # Respect strict format: caption must be @<username> "..." if provided
+        caption = message.caption or ""
+        if caption.strip():
+            parsed = self._parse_strict_command(caption.strip())
+            if parsed is None:
+                return
+            user_prompt = parsed
+        else:
+            user_prompt = "Describe this image in detail."
+
+        # Get the highest resolution photo
+        photo = message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
+        img_bytes = await file.download_as_bytearray()
+
+        user = update.effective_user
+        chat = update.effective_chat
+        if user is None or chat is None:
+            return
+
+        # Reuse persona if any
+        _persona_name, persona_sys = self.store.get_user_persona(user.id)
+        system_prompt = build_system_prompt(config.SYSTEM_PROMPT_BASE, persona_sys)
+
+        try:
+            async with self._openai_sem:
+                analysis_text = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self.engine.generate_vision_reply(
+                        prompt_text=user_prompt,
+                        image_bytes=bytes(img_bytes),
+                        system_prompt=system_prompt,
+                    ),
+                )
+        except Exception as e:
+            logger.exception("OpenAI vision request failed: %s", e)
+            await self._safe_reply(update, context, "Sorry, I couldn't analyze that image right now. Please try again.")
+            return
+
+        # Save minimal memory: store the prompt and summary
+        self.store.append_message(user.id, "user", f"[image] {user_prompt}")
+        self.store.append_message(user.id, "assistant", analysis_text)
+
+        # Reply with analysis
+        for chunk in self._chunk_text(analysis_text, config.REPLY_MAX_CHARS):
             await context.bot.send_message(chat_id=chat.id, text=chunk)
 
     def run(self) -> None:

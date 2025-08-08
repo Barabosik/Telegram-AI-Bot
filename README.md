@@ -36,6 +36,9 @@ The bot uses polling; no webhook setup required for local runs.
 - Examples:
   - `@Botinochek_AI_BOT "Hello, how are you?"`
   - `@Botinochek_AI_BOT "act like Einstein and explain relativity"`
+- Images:
+  - Send a photo with an optional caption in the same strict format to guide analysis, e.g. `@Botinochek_AI_BOT "analyze this product label for allergens"`.
+  - If no caption is provided, the bot will describe the image.
 - Show persona: `/persona`
 - Clear persona: `/persona clear`
 - Reset memory: `/reset`
