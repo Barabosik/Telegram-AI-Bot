@@ -31,5 +31,13 @@ SYSTEM_PROMPT_BASE = (
     "Do not roleplay unsafe or harmful behaviors. If a request is unsafe, refuse politely."
 )
 
+# Extra guidance appended for vision/image analysis tasks
+VISION_SYSTEM_SUFFIX = (
+    "When analyzing images, be robust across screenshots, documents, scenes, memes, and product photos. "
+    "Perform OCR when helpful; extract key text succinctly. Identify objects, relationships, and any data or charts. "
+    "Summarize with the most important points first, then details. If the user asks a question, answer it directly first. "
+    "Flag potential safety issues, sensitive info, or uncertainties. If the image is ambiguous, state reasonable interpretations."
+)
+
 # Safety and formatting
 REPLY_MAX_CHARS = 3800  # Telegram hard limit ~4096; we keep some headroom

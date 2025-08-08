@@ -164,30 +164,31 @@ class GPTEngine:
     def generate_vision_reply(
         self,
         prompt_text: Optional[str],
-        image_bytes: bytes,
+        image_bytes: bytes | None = None,
+        images_bytes_list: Optional[List[bytes]] = None,
         system_prompt: Optional[str] = None,
     ) -> str:
         """
-        Generate a reply based on an image plus optional user text using GPT vision (4o family).
+        Generate a reply based on one or more images plus optional user text using GPT vision (4o family).
         """
         user_text = (prompt_text or "Describe this image in detail.").strip()
-
-        mime = self._guess_mime(image_bytes)
-        b64 = base64.b64encode(image_bytes).decode("ascii")
-        data_url = f"data:{mime};base64,{b64}"
 
         chat_messages: List[Dict] = []
         if system_prompt:
             chat_messages.append({"role": "system", "content": system_prompt})
-        chat_messages.append(
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_text},
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                ],
-            }
-        )
+        content_parts: List[Dict] = [{"type": "text", "text": user_text}]
+        # Prepare images
+        images: List[bytes] = []
+        if images_bytes_list and len(images_bytes_list) > 0:
+            images.extend(images_bytes_list)
+        elif image_bytes is not None:
+            images.append(image_bytes)
+        for img in images:
+            mime = self._guess_mime(img)
+            b64 = base64.b64encode(img).decode("ascii")
+            data_url = f"data:{mime};base64,{b64}"
+            content_parts.append({"type": "image_url", "image_url": {"url": data_url}})
+        chat_messages.append({"role": "user", "content": content_parts})
 
         # Rate limit before calling the API
         self._respect_min_interval()

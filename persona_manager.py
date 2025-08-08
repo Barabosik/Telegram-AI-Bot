@@ -112,3 +112,12 @@ def build_system_prompt(base_prompt: str, persona_instruction: Optional[str]) ->
     if persona_instruction:
         return f"{base_prompt}\n\nPersona:\n{persona_instruction}"
     return base_prompt
+
+
+def build_vision_system_prompt(base_prompt: str, vision_suffix: str, persona_instruction: Optional[str]) -> str:
+    prompt = base_prompt
+    if vision_suffix:
+        prompt = f"{prompt}\n\nVision:\n{vision_suffix}"
+    if persona_instruction:
+        prompt = f"{prompt}\n\nPersona:\n{persona_instruction}"
+    return prompt

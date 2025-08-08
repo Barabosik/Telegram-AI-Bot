@@ -19,7 +19,7 @@ from telegram.ext import (
 
 import config
 from gpt_engine import build_engine_from_config
-from persona_manager import extract_persona_and_clean_text, build_system_prompt
+from persona_manager import extract_persona_and_clean_text, build_system_prompt, build_vision_system_prompt
 
 logging.basicConfig(
     level=logging.INFO,
@@ -159,13 +159,12 @@ class TelegramPersonaBot:
 
     def _parse_strict_command(self, text: str) -> Optional[str]:
         """
-        Accept only messages like: @<bot_username> "user message"
-        Returns the quoted user message if pattern matches, else None.
-        Supports straight and curly quotes.
+        Accept only messages like: @<bot_username> user message...
+        Returns the trailing message content if pattern matches, else None.
         """
         if not self.bot_username:
             return None
-        pattern = rf"^\s*@{re.escape(self.bot_username)}\s+([\"“”])(?P<msg>.+?)\1\s*$"
+        pattern = rf"^\s*@{re.escape(self.bot_username)}\s+(?P<msg>.+?)\s*$"
         m = re.match(pattern, text.strip(), flags=re.IGNORECASE | re.DOTALL)
         if m:
             return m.group("msg").strip()
@@ -256,7 +255,7 @@ class TelegramPersonaBot:
             return
 
         raw_text = message.text.strip()
-        # Enforce strict pattern @<username> "..."
+        # Enforce strict pattern @<username> <message>
         parsed = self._parse_strict_command(raw_text)
         if parsed is None:
             return
@@ -314,7 +313,7 @@ class TelegramPersonaBot:
         if message is None or not message.photo:
             return
 
-        # Respect strict format: caption must be @<username> "..." if provided
+        # Respect strict format: caption must start with @<username> <message>
         caption = message.caption or ""
         if caption.strip():
             parsed = self._parse_strict_command(caption.strip())
@@ -322,7 +321,8 @@ class TelegramPersonaBot:
                 return
             user_prompt = parsed
         else:
-            user_prompt = "Describe this image in detail."
+            # No caption: ignore unless we want to default describe; per requirement, respond only when tagged
+            return
 
         # Get the highest resolution photo
         photo = message.photo[-1]
@@ -336,7 +336,11 @@ class TelegramPersonaBot:
 
         # Reuse persona if any
         _persona_name, persona_sys = self.store.get_user_persona(user.id)
-        system_prompt = build_system_prompt(config.SYSTEM_PROMPT_BASE, persona_sys)
+        system_prompt = build_vision_system_prompt(
+            config.SYSTEM_PROMPT_BASE,
+            config.VISION_SYSTEM_SUFFIX,
+            persona_sys,
+        )
 
         try:
             async with self._openai_sem:
