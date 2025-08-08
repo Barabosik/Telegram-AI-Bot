@@ -32,14 +32,16 @@ python bot.py
 The bot uses polling; no webhook setup required for local runs.
 
 ## Usage
-- In a group: `@Bot act like Socrates and help me think through this decision`.
-- In a private chat: `act like Steve Jobs and pitch my app idea`.
+- Strict format (groups or private): `@<your_bot_username> "your message here"`
+- Examples:
+  - `@Botinochek_AI_BOT "Hello, how are you?"`
+  - `@Botinochek_AI_BOT "act like Einstein and explain relativity"`
 - Show persona: `/persona`
 - Clear persona: `/persona clear`
 - Reset memory: `/reset`
 
 ## Notes
-- The bot auto-detects its actual `@username` and treats it as a valid mention in addition to the `BOT_MENTION_ALIAS` in `config.py`.
+- The bot enforces a minimum delay between OpenAI API calls (`OPENAI_MIN_CALL_INTERVAL_SECONDS`) and retries transient errors up to `OPENAI_RETRY_ATTEMPTS`.
 - Memory is limited by `MEMORY_MESSAGE_LIMIT` and trimmed in the GPT engine to stay within context budget.
 - For safety, the system prompt instructs the model to refuse unsafe behavior.
 

@@ -11,6 +11,10 @@ TEMPERATURE = 0.7
 MAX_TOKENS = 600  # Max tokens for the assistant reply
 REQUEST_TIMEOUT_SECONDS = 40
 
+# Rate limiting and retries for OpenAI
+OPENAI_MIN_CALL_INTERVAL_SECONDS = 1.0  # enforce a minimum delay between API calls
+OPENAI_RETRY_ATTEMPTS = 5  # number of retry attempts on transient errors
+
 # Bot mention alias: messages starting with this will be processed in group chats
 # The bot will also accept mentions of its actual @username dynamically.
 BOT_MENTION_ALIAS = "@Bot"

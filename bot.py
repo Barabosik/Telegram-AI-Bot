@@ -142,6 +142,7 @@ class TelegramPersonaBot:
             .build()
         )
         self.bot_username: Optional[str] = None
+        self._openai_sem = asyncio.Semaphore(1)
 
         # Handlers
         self.app.add_handler(CommandHandler("start", self.on_start))
@@ -154,6 +155,20 @@ class TelegramPersonaBot:
             me = await context.bot.get_me()
             self.bot_username = me.username
             logger.info("Bot username resolved as @%s", self.bot_username)
+
+    def _parse_strict_command(self, text: str) -> Optional[str]:
+        """
+        Accept only messages like: @<bot_username> "user message"
+        Returns the quoted user message if pattern matches, else None.
+        Supports straight and curly quotes.
+        """
+        if not self.bot_username:
+            return None
+        pattern = rf"^\s*@{re.escape(self.bot_username)}\s+([\"“”])(?P<msg>.+?)\1\s*$"
+        m = re.match(pattern, text.strip(), flags=re.IGNORECASE | re.DOTALL)
+        if m:
+            return m.group("msg").strip()
+        return None
 
     def _is_addressed_to_bot(self, text: str, chat_type: str) -> bool:
         # Private chats: treat all messages as addressed to the bot
@@ -184,12 +199,14 @@ class TelegramPersonaBot:
 
     async def on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._ensure_bot_username(context)
-        mention = f"@{self.bot_username}" if self.bot_username else config.BOT_MENTION_ALIAS
+        mention = f"@{self.bot_username}" if self.bot_username else "@<your_bot_username>"
         msg = (
             "Hi! I’m your GPT-powered persona bot.\n\n"
-            f"- In groups, mention me like '{mention} act like Einstein and explain relativity'.\n"
-            "- In private chat, just type your request.\n"
-            "- Commands: /persona (show/clear), /reset (clear memory)."
+            f"Use: {mention} \"your message here\"\n"
+            "Examples:\n"
+            f"- {mention} \"Hello, how are you?\"\n"
+            f"- {mention} \"act like Einstein and explain relativity\"\n"
+            "Commands: /persona (show/clear), /reset (clear memory)."
         )
         await self._safe_reply(update, context, msg)
 
@@ -237,16 +254,17 @@ class TelegramPersonaBot:
         if message is None or message.text is None:
             return
 
-        text = message.text.strip()
-        chat_type = message.chat.type  # str in PTB
-        if not self._is_addressed_to_bot(text, chat_type):
-            return  # Ignore chatter not directed at us in groups
+        raw_text = message.text.strip()
+        # Enforce strict pattern @<username> "..."
+        parsed = self._parse_strict_command(raw_text)
+        if parsed is None:
+            return
 
         user = update.effective_user
         if user is None:
             return
         user_id = user.id
-        query_raw = self._remove_mention_prefix(text)
+        query_raw = parsed
 
         # Extract persona and cleaned query
         persona_name, persona_sys, cleaned_query = extract_persona_and_clean_text(query_raw)
@@ -254,11 +272,10 @@ class TelegramPersonaBot:
             self.store.set_user_persona(user_id, persona_name, persona_sys)
             logger.info("Persona for %s set to %s", user_id, persona_name)
         else:
-            # If no new persona directive, reuse existing persona if any
             persona_name, persona_sys = self.store.get_user_persona(user_id)
 
         if not cleaned_query:
-            await self._safe_reply(update, context, "Please include a question or request after mentioning me.")
+            await self._safe_reply(update, context, "Please include a question or request in quotes.")
             return
 
         # Build conversation context
@@ -269,10 +286,11 @@ class TelegramPersonaBot:
         system_prompt = build_system_prompt(config.SYSTEM_PROMPT_BASE, persona_sys)
 
         try:
-            assistant_text = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self.engine.generate_reply(messages=messages, system_prompt=system_prompt),
-            )
+            async with self._openai_sem:
+                assistant_text = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self.engine.generate_reply(messages=messages, system_prompt=system_prompt),
+                )
         except Exception as e:
             logger.exception("OpenAI request failed: %s", e)
             await self._safe_reply(update, context, "Sorry, I had trouble generating a response. Please try again.")

@@ -1,4 +1,6 @@
 import logging
+import threading
+import time
 from typing import List, Dict, Optional, Iterable, cast
 
 import tiktoken
@@ -59,6 +61,19 @@ class GPTEngine:
         self.max_tokens = max_tokens
         self.request_timeout_seconds = request_timeout_seconds
         self.encoding = _encoding_for_model(model)
+        # Rate limiting state
+        self._rl_lock = threading.Lock()
+        self._last_call_ts = 0.0
+
+    def _respect_min_interval(self) -> None:
+        # Ensure a minimum interval between OpenAI calls
+        with self._rl_lock:
+            now = time.monotonic()
+            elapsed = now - self._last_call_ts
+            min_interval = max(0.0, float(config.OPENAI_MIN_CALL_INTERVAL_SECONDS))
+            if elapsed < min_interval:
+                time.sleep(min_interval - elapsed)
+            self._last_call_ts = time.monotonic()
 
     def _trim_messages_to_fit(self, messages: List[Dict]) -> List[Dict]:
         """
@@ -98,7 +113,8 @@ class GPTEngine:
         trimmed.extend(reversed(kept_reversed))
         return trimmed
 
-    @retry(wait=wait_exponential(multiplier=1, min=1, max=10), stop=stop_after_attempt(3), reraise=True,
+    @retry(wait=wait_exponential(multiplier=1, min=1, max=10),
+           stop=stop_after_attempt(config.OPENAI_RETRY_ATTEMPTS), reraise=True,
            retry=retry_if_exception_type(Exception))
     def generate_reply(self, messages: List[Dict], system_prompt: Optional[str] = None) -> str:
         """
@@ -113,6 +129,9 @@ class GPTEngine:
         chat_messages = self._trim_messages_to_fit(chat_messages)
 
         logger.debug("Submitting to OpenAI with %d messages", len(chat_messages))
+
+        # Rate limit before calling the API
+        self._respect_min_interval()
 
         # Cast messages to expected param type for type-checkers
         typed_messages: Iterable[ChatCompletionMessageParam] = cast(
