@@ -1,0 +1,4 @@
+python-telegram-bot==21.6
+openai==1.52.2
+tenacity==8.5.0
+tiktoken==0.7.0
