@@ -1,9 +1,10 @@
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Iterable, cast
 
 import tiktoken
 from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 from openai import OpenAI
+from openai.types.chat import ChatCompletionMessageParam
 
 import config
 
@@ -24,9 +25,10 @@ def _encoding_for_model(model_name: str):
 
 def _count_tokens(encoding, text: str) -> int:
     try:
-        return len(encoding.encode(text))
+        return int(len(encoding.encode(text)))
     except Exception:
-        return len(text.split()) * 1.3  # very rough fallback
+        # rough fallback, ensure int
+        return int(len(text.split()) * 1.3)
 
 
 def _messages_token_length(encoding, messages: List[Dict]) -> int:
@@ -112,10 +114,15 @@ class GPTEngine:
 
         logger.debug("Submitting to OpenAI with %d messages", len(chat_messages))
 
+        # Cast messages to expected param type for type-checkers
+        typed_messages: Iterable[ChatCompletionMessageParam] = cast(
+            Iterable[ChatCompletionMessageParam], chat_messages
+        )
+
         client = self.client.with_options(timeout=self.request_timeout_seconds)
         resp = client.chat.completions.create(
             model=self.model,
-            messages=chat_messages,
+            messages=typed_messages,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
         )

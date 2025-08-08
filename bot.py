@@ -7,7 +7,6 @@ import time
 from typing import List, Dict, Optional, Tuple
 
 from telegram import Update
-from telegram.constants import ChatType
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -156,8 +155,9 @@ class TelegramPersonaBot:
             self.bot_username = me.username
             logger.info("Bot username resolved as @%s", self.bot_username)
 
-    def _is_addressed_to_bot(self, text: str, chat_type: ChatType) -> bool:
-        if chat_type == ChatType.PRIVATE:
+    def _is_addressed_to_bot(self, text: str, chat_type: str) -> bool:
+        # Private chats: treat all messages as addressed to the bot
+        if chat_type.lower() == "private":
             return True
         aliases = {config.BOT_MENTION_ALIAS.lower()}
         if self.bot_username:
@@ -176,6 +176,12 @@ class TelegramPersonaBot:
                 return text[len(a) :].lstrip(" ,:\u200b\n\t")
         return text
 
+    async def _safe_reply(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+        chat = update.effective_chat
+        if chat is None:
+            return
+        await context.bot.send_message(chat_id=chat.id, text=text)
+
     async def on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._ensure_bot_username(context)
         mention = f"@{self.bot_username}" if self.bot_username else config.BOT_MENTION_ALIAS
@@ -185,24 +191,29 @@ class TelegramPersonaBot:
             "- In private chat, just type your request.\n"
             "- Commands: /persona (show/clear), /reset (clear memory)."
         )
-        await update.message.reply_text(msg)
+        await self._safe_reply(update, context, msg)
 
     async def on_reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        user_id = update.effective_user.id
-        self.store.clear_history(user_id)
-        await update.message.reply_text("Your conversation history has been cleared.")
+        user = update.effective_user
+        if user is None:
+            return
+        self.store.clear_history(user.id)
+        await self._safe_reply(update, context, "Your conversation history has been cleared.")
 
     async def on_persona(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        user_id = update.effective_user.id
+        user = update.effective_user
+        if user is None:
+            return
+        user_id = user.id
         if context.args and context.args[0].lower() in {"clear", "reset"}:
             self.store.clear_user_persona(user_id)
-            await update.message.reply_text("Persona cleared. You can set a new one by saying 'act like ...'.")
+            await self._safe_reply(update, context, "Persona cleared. You can set a new one by saying 'act like ...'.")
             return
         name, _sys = self.store.get_user_persona(user_id)
         if name:
-            await update.message.reply_text(f"Current persona: {name}")
+            await self._safe_reply(update, context, f"Current persona: {name}")
         else:
-            await update.message.reply_text("No persona set. Say something like 'act like Einstein' to set one.")
+            await self._safe_reply(update, context, "No persona set. Say something like 'act like Einstein' to set one.")
 
     def _chunk_text(self, text: str, limit: int) -> List[str]:
         chunks: List[str] = []
@@ -223,15 +234,18 @@ class TelegramPersonaBot:
     async def on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._ensure_bot_username(context)
         message = update.message
-        if not message or not message.text:
+        if message is None or message.text is None:
             return
 
         text = message.text.strip()
-        chat_type = message.chat.type
+        chat_type = message.chat.type  # str in PTB
         if not self._is_addressed_to_bot(text, chat_type):
             return  # Ignore chatter not directed at us in groups
 
-        user_id = update.effective_user.id
+        user = update.effective_user
+        if user is None:
+            return
+        user_id = user.id
         query_raw = self._remove_mention_prefix(text)
 
         # Extract persona and cleaned query
@@ -244,7 +258,7 @@ class TelegramPersonaBot:
             persona_name, persona_sys = self.store.get_user_persona(user_id)
 
         if not cleaned_query:
-            await message.reply_text("Please include a question or request after mentioning me.")
+            await self._safe_reply(update, context, "Please include a question or request after mentioning me.")
             return
 
         # Build conversation context
@@ -261,7 +275,7 @@ class TelegramPersonaBot:
             )
         except Exception as e:
             logger.exception("OpenAI request failed: %s", e)
-            await message.reply_text("Sorry, I had trouble generating a response. Please try again.")
+            await self._safe_reply(update, context, "Sorry, I had trouble generating a response. Please try again.")
             return
 
         # Persist messages
@@ -269,8 +283,11 @@ class TelegramPersonaBot:
         self.store.append_message(user_id, "assistant", assistant_text)
 
         # Respect Telegram message size limits
+        chat = update.effective_chat
+        if chat is None:
+            return
         for chunk in self._chunk_text(assistant_text, config.REPLY_MAX_CHARS):
-            await message.reply_text(chunk)
+            await context.bot.send_message(chat_id=chat.id, text=chunk)
 
     def run(self) -> None:
         logger.info("Starting Telegram bot...")
