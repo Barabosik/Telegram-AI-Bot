@@ -32,10 +32,10 @@ python bot.py
 The bot uses polling; no webhook setup required for local runs.
 
 ## Usage
-- Strict format (groups or private): `@<your_bot_username> "your message here"`
+- Strict format (groups or private): `@<your_bot_username> your message here`
 - Examples:
-  - `@Botinochek_AI_BOT "Hello, how are you?"`
-  - `@Botinochek_AI_BOT "act like Einstein and explain relativity"`
+  - `@Botinochek_AI_BOT Hello, how are you?`
+  - `@Botinochek_AI_BOT act like Einstein and explain relativity`
 - Images:
   - Send a photo with an optional caption in the same strict format to guide analysis, e.g. `@Botinochek_AI_BOT "analyze this product label for allergens"`.
   - If no caption is provided, the bot will describe the image.
